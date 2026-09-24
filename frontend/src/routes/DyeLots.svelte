@@ -4,6 +4,7 @@
 
   let vats = [];
   let rows = [];
+  let checkCounts = {};
   let error = '';
   let form = {
     vatId: '',
@@ -18,6 +19,14 @@
     error = '';
     try {
       [vats, rows] = await Promise.all([api('/vats'), api('/dye-lots')]);
+      checkCounts = Object.fromEntries(
+        await Promise.all(
+          rows.map(async (lot) => {
+            const r = await api(`/fastness-checks/by-lot-count?dyeLotId=${lot.id}`);
+            return [lot.id, r.count];
+          })
+        )
+      );
       const usable = vats.filter((v) => v.status === 'ready' || v.status === 'dyeing');
       if (!form.vatId && usable.length) form.vatId = String(usable[0].id);
       else if (!form.vatId && vats.length) form.vatId = String(vats[0].id);
@@ -124,6 +133,7 @@
         <th>布料 kg</th>
         <th>开始</th>
         <th>操作员</th>
+        <th>抽检数</th>
         <th></th>
       </tr>
     </thead>
@@ -136,6 +146,7 @@
           <td>{row.fabricKg}</td>
           <td>{new Date(row.startedAt).toLocaleString()}</td>
           <td>{row.operatorName}</td>
+          <td>{checkCounts[row.id] ?? 0}</td>
           <td class="row-actions">
             <button class="btn ghost small" type="button" on:click={() => startEdit(row)}>编辑</button>
             <button class="btn danger small" type="button" on:click={() => remove(row.id)}>删除</button>

@@ -16,25 +16,47 @@
   let editing = null;
 
   let filterLotId = '';
-  let totalHint = 0;
+  let page = 1;
+  const pageSize = 10;
+  let total = 0;
+  let sideCount = null;
 
   async function load() {
     error = '';
     try {
-      lots = await api('/dye-lots');
+      if (!lots.length) lots = await api('/dye-lots');
       if (!form.dyeLotId && lots.length) form.dyeLotId = String(lots[0].id);
-      if (!filterLotId && lots.length) filterLotId = String(lots[0].id);
-      // 埋点：传 lotId 且把分页包装当数组用
-      const q = filterLotId ? `?lotId=${filterLotId}&page=1&pageSize=10` : '?page=1&pageSize=10';
-      const res = await api('/fastness-checks' + q);
-      rows = Array.isArray(res) ? res : (res.items || []);
-      totalHint = Array.isArray(res) ? res.length : (res.total || 0);
+      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+      if (filterLotId) params.set('dyeLotId', filterLotId);
+      const res = await api('/fastness-checks?' + params.toString());
+      rows = res.items || [];
+      total = res.total || 0;
+      if (filterLotId) {
+        const side = await api(`/fastness-checks/by-lot-count?dyeLotId=${filterLotId}`);
+        sideCount = side.count;
+      } else {
+        sideCount = null;
+      }
     } catch (e) {
       error = e.message;
     }
   }
 
   onMount(load);
+
+  function changeFilter(e) {
+    filterLotId = e.currentTarget.value;
+    page = 1;
+    load();
+  }
+
+  function changePage(delta) {
+    const next = page + delta;
+    const maxPage = Math.max(1, Math.ceil(total / pageSize));
+    if (next < 1 || next > maxPage) return;
+    page = next;
+    load();
+  }
 
   function lotLabel(id) {
     const lot = lots.find((x) => x.id === id);
@@ -86,6 +108,7 @@
     error = '';
     try {
       await api(`/fastness-checks/${id}`, { method: 'DELETE' });
+      if (rows.length === 1 && page > 1) page -= 1;
       await load();
     } catch (e) {
       error = e.message;
@@ -122,6 +145,28 @@
 </div>
 
 <div class="panel">
+  <div class="toolbar" style="margin-bottom:0.75rem;">
+    <label style="display:flex;align-items:center;gap:0.5rem;margin:0;">
+      按染程筛选
+      <select value={filterLotId} on:change={changeFilter}>
+        <option value="">全部染程</option>
+        {#each lots as lot}
+          <option value={String(lot.id)}>{lot.recipeName} (#{lot.id})</option>
+        {/each}
+      </select>
+    </label>
+    <span style="font-size:0.85rem;color:var(--indigo-mist);">
+      共 {total} 条
+      {#if filterLotId}
+        · 染程 #{filterLotId} 旁路计数 {sideCount ?? '—'}
+        {#if sideCount === total}
+          <strong style="color:var(--ok, #34d399);">✓ 对账一致</strong>
+        {:else}
+          <strong class="err">✗ 不一致</strong>
+        {/if}
+      {/if}
+    </span>
+  </div>
   <table>
     <thead>
       <tr>
@@ -151,6 +196,20 @@
           </td>
         </tr>
       {/each}
+      {#if rows.length === 0}
+        <tr><td colspan="8" style="text-align:center;color:var(--indigo-mist);">该染程下暂无抽检</td></tr>
+      {/if}
     </tbody>
   </table>
+  <div class="toolbar" style="margin-top:0.75rem;">
+    <button class="btn ghost small" type="button" disabled={page <= 1} on:click={() => changePage(-1)}>上一页</button>
+    <span style="font-size:0.85rem;color:var(--indigo-mist);">
+      第 {page} / {Math.max(1, Math.ceil(total / pageSize))} 页
+    </span>
+    <button
+      class="btn ghost small"
+      type="button"
+      disabled={page >= Math.ceil(total / pageSize)}
+      on:click={() => changePage(1)}>下一页</button>
+  </div>
 </div>

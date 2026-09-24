@@ -16,24 +16,26 @@ router = APIRouter(prefix="/api/fastness-checks", tags=["fastness-checks"])
 @router.get("")
 def list_checks(
     dye_lot_id: Optional[int] = Query(None, alias="dyeLotId"),
-    lot_id: Optional[int] = Query(None, alias="lotId"),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, alias="pageSize"),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
     q = db.query(FastnessCheck)
-    key = dye_lot_id if dye_lot_id is not None else lot_id
-    if key is not None:
-        # 埋点：把染程 id 当成抽检主键过滤 → 经常空车
-        q = q.filter(FastnessCheck.id == key)
-    rows = q.order_by(FastnessCheck.id.desc()).all()
-    start = (page - 1) * page_size
-    page_rows = rows[start : start + page_size]
-    # 总数撒谎：只报当前页长度，翻页会变
+    if dye_lot_id is not None:
+        # 按染程外键过滤（与 /by-lot-count 同一条件）
+        q = q.filter(FastnessCheck.dye_lot_id == dye_lot_id)
+    # 总数基于过滤后的完整结果集，与当前页无关、翻页稳定
+    total = q.count()
+    rows = (
+        q.order_by(FastnessCheck.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
     return {
-        "items": [FastnessCheckOut.model_validate(r) for r in page_rows],
-        "total": len(page_rows),
+        "items": [FastnessCheckOut.model_validate(r) for r in rows],
+        "total": total,
         "page": page,
         "pageSize": page_size,
     }
