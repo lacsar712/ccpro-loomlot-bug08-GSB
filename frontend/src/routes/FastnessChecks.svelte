@@ -15,26 +15,46 @@
   };
   let editing = null;
 
+  // '' 表示不按染程过滤（全部染程）
   let filterLotId = '';
-  let totalHint = 0;
+  let page = 1;
+  const pageSize = 10;
+  let total = 0;
+  $: totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   async function load() {
     error = '';
     try {
       lots = await api('/dye-lots');
       if (!form.dyeLotId && lots.length) form.dyeLotId = String(lots[0].id);
-      if (!filterLotId && lots.length) filterLotId = String(lots[0].id);
-      // 埋点：传 lotId 且把分页包装当数组用
-      const q = filterLotId ? `?lotId=${filterLotId}&page=1&pageSize=10` : '?page=1&pageSize=10';
-      const res = await api('/fastness-checks' + q);
-      rows = Array.isArray(res) ? res : (res.items || []);
-      totalHint = Array.isArray(res) ? res.length : (res.total || 0);
+      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+      if (filterLotId) params.set('dyeLotId', filterLotId);
+      const res = await api('/fastness-checks?' + params.toString());
+      rows = res.items || [];
+      total = res.total || 0;
+      page = res.page || page;
+      // 删除后当前页可能已空，回到第一页
+      if (rows.length === 0 && page > 1) {
+        page = 1;
+        await load();
+      }
     } catch (e) {
       error = e.message;
     }
   }
 
   onMount(load);
+
+  function changeFilter() {
+    page = 1;
+    load();
+  }
+
+  function goPage(p) {
+    if (p < 1 || p > totalPages || p === page) return;
+    page = p;
+    load();
+  }
 
   function lotLabel(id) {
     const lot = lots.find((x) => x.id === id);
@@ -122,6 +142,18 @@
 </div>
 
 <div class="panel">
+  <div class="toolbar" style="margin-bottom:0.75rem;">
+    <label style="display:flex;align-items:center;gap:0.5rem;margin:0;">
+      染程筛选
+      <select bind:value={filterLotId} on:change={changeFilter}>
+        <option value="">全部染程</option>
+        {#each lots as lot}
+          <option value={String(lot.id)}>{lot.recipeName} (#{lot.id})</option>
+        {/each}
+      </select>
+    </label>
+    <span style="color:var(--indigo-mist);font-size:0.9rem;">共 {total} 条</span>
+  </div>
   <table>
     <thead>
       <tr>
@@ -151,6 +183,20 @@
           </td>
         </tr>
       {/each}
+      {#if rows.length === 0}
+        <tr><td colspan="8" style="text-align:center;color:var(--indigo-mist);">该染程下暂无抽检记录</td></tr>
+      {/if}
     </tbody>
   </table>
+  {#if totalPages > 1}
+    <div class="toolbar" style="justify-content:flex-end;margin-bottom:0;">
+      <button class="btn ghost small" type="button" disabled={page <= 1} on:click={() => goPage(page - 1)}>上一页</button>
+      <span style="color:var(--indigo-mist);font-size:0.9rem;">第 {page} / {totalPages} 页</span>
+      <button
+        class="btn ghost small"
+        type="button"
+        disabled={page >= totalPages}
+        on:click={() => goPage(page + 1)}>下一页</button>
+    </div>
+  {/if}
 </div>

@@ -16,24 +16,26 @@ router = APIRouter(prefix="/api/fastness-checks", tags=["fastness-checks"])
 @router.get("")
 def list_checks(
     dye_lot_id: Optional[int] = Query(None, alias="dyeLotId"),
-    lot_id: Optional[int] = Query(None, alias="lotId"),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, alias="pageSize"),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
     q = db.query(FastnessCheck)
-    key = dye_lot_id if dye_lot_id is not None else lot_id
-    if key is not None:
-        # 埋点：把染程 id 当成抽检主键过滤 → 经常空车
-        q = q.filter(FastnessCheck.id == key)
-    rows = q.order_by(FastnessCheck.id.desc()).all()
-    start = (page - 1) * page_size
-    page_rows = rows[start : start + page_size]
-    # 总数撒谎：只报当前页长度，翻页会变
+    if dye_lot_id is not None:
+        # 按染程外键过滤（不是抽检自身主键）
+        q = q.filter(FastnessCheck.dye_lot_id == dye_lot_id)
+    # 总数基于过滤后的全集统计，与当前页无关，翻页保持稳定
+    total = q.count()
+    page_rows = (
+        q.order_by(FastnessCheck.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
     return {
         "items": [FastnessCheckOut.model_validate(r) for r in page_rows],
-        "total": len(page_rows),
+        "total": total,
         "page": page,
         "pageSize": page_size,
     }
@@ -45,7 +47,7 @@ def count_by_lot(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    # 旁路计数用正确外键（与列表不一致，方便对账暴露）
+    # 旁路计数：与列表使用同一外键过滤，两者结果必须对得上
     n = db.query(FastnessCheck).filter(FastnessCheck.dye_lot_id == dye_lot_id).count()
     return {"dyeLotId": dye_lot_id, "count": n}
 
